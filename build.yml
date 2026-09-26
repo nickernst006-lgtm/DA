@@ -1,0 +1,129 @@
+# Облачная сборка и проверка N Documents на настоящем Mac с Xcode (GitHub Actions).
+# Вся логика шагов лежит в папке ci/ внутри архива приложения —
+# поэтому для исправлений достаточно заменить архив, этот файл менять не нужно.
+name: Сборка и тесты
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v5
+
+      - name: Подготовить файлы (распаковать архив)
+        id: prep
+        run: |
+          if [ ! -f project.yml ] || [ ! -d DocumentsApp ] || [ ! -d ci ]; then
+            Z=$(ls *.zip 2>/dev/null | sort -V | tail -1)
+            if [ -n "$Z" ]; then
+              echo "Распаковываю $Z"
+              rm -rf _unz && unzip -q -o "$Z" -d _unz
+              P=$(find _unz -name project.yml -not -path '*__MACOSX*' | head -1)
+              if [ -n "$P" ]; then cp -R "$(dirname "$P")"/. . ; fi
+            fi
+          fi
+          ls -la
+          if [ ! -d DocumentsApp ] || [ ! -f project.yml ] || [ ! -d ci ]; then
+            echo "::error::Не найдены файлы приложения. Загрузите в репозиторий архив DocumentsApp_vX.zip (Add file → Upload files)."
+            exit 1
+          fi
+
+      - name: Проверить принципы серии
+        id: rules
+        run: bash ci/check_principles.sh
+
+      - name: Выбрать Xcode
+        id: xcode
+        run: bash ci/select_xcode.sh
+
+      - name: Сгенерировать проект Xcode
+        id: gen
+        run: bash ci/generate_project.sh
+
+      - name: 1) Компиляция для iPhone
+        id: compile
+        run: bash ci/compile_release.sh
+
+      - name: Упаковать .ipa
+        run: bash ci/package_ipa.sh
+
+      - name: Найти симулятор iPhone
+        id: sim
+        run: bash ci/find_simulator.sh
+
+      - name: 2) Юнит-тесты
+        id: unit
+        run: bash ci/unit_tests.sh
+        env:
+          SIM_UDID: ${{ steps.sim.outputs.udid }}
+
+      - name: 3) UI-тесты со скриншотами
+        id: ui
+        continue-on-error: true
+        run: bash ci/ui_tests.sh
+        env:
+          SIM_UDID: ${{ steps.sim.outputs.udid }}
+
+      - name: Извлечь скриншоты
+        if: always()
+        continue-on-error: true
+        run: bash ci/extract_screenshots.sh
+
+      - name: Упаковать проект Xcode
+        if: always()
+        continue-on-error: true
+        run: bash ci/package_project.sh
+
+      - name: Итог
+        if: always()
+        continue-on-error: true
+        run: bash ci/summary.sh
+        env:
+          S_PREP: ${{ steps.prep.outcome }}
+          S_RULES: ${{ steps.rules.outcome }}
+          S_XCODE: ${{ steps.xcode.outcome }}
+          S_GEN: ${{ steps.gen.outcome }}
+          S_COMPILE: ${{ steps.compile.outcome }}
+          S_UNIT: ${{ steps.unit.outcome }}
+          S_UI: ${{ steps.ui.outcome }}
+
+      - name: Выгрузить приложение (.ipa)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: DocumentsApp-ipa
+          path: DocumentsApp-unsigned.ipa
+          if-no-files-found: ignore
+
+      - name: Выгрузить скриншоты
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: ignore
+
+      - name: Выгрузить проект Xcode
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: DocumentsApp-Xcode-project
+          path: DocumentsApp-Xcode-project.zip
+          if-no-files-found: ignore
+
+      - name: Выгрузить журналы
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: logs
+          path: "*.log"
+          if-no-files-found: ignore
