@@ -24,7 +24,8 @@ jobs:
             if [ -n "$found" ]; then
               ROOT=$(dirname "$found")
             else
-              zipfile=$(find . -maxdepth 2 -name "*.zip" | head -1)
+              # Если архивов несколько, берём самую новую версию.
+              zipfile=$(find . -maxdepth 2 -name "*.zip" | sort -V | tail -1)
               if [ -n "$zipfile" ]; then
                 echo "Распаковываю $zipfile"
                 unzip -q "$zipfile" -d _src
@@ -40,6 +41,19 @@ jobs:
           echo "Проект найден в: $ROOT"
           ls -la "$ROOT"
           echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Подготовить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Обновить базу фильмов из Wikidata
+        # Если Wikidata недоступна, сборка продолжится с прежней базой.
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          cd "$ROOT"
+          python3 scripts/fetch_wikidata.py --limit 10000
 
       - name: Версия Xcode
         run: xcodebuild -version
