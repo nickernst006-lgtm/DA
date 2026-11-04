@@ -1,0 +1,60 @@
+name: Каталог фильмов
+
+# Пополняет библиотеку ance фильмами из ПоискКино (лимит ключа — 200 запросов в сутки).
+# Пока библиотека не заполнена, один запуск добавляет ~47 000 фильмов: три запуска в разные дни — ~100 000.
+# Потом каждый запуск добавляет только свежие фильмы.
+# Запускается при каждой загрузке нового кода и вручную: Actions → «Каталог фильмов» → Run workflow.
+#
+# Доступа к базе у GitHub нет: только публичный ключ приложения и CATALOG_TOKEN —
+# ключ «почтовой щели», которым можно лишь добавить или обновить фильмы.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v4
+
+      - name: Найти проект
+        run: |
+          ROOT=""
+          if [ -f project.yml ]; then
+            ROOT="."
+          else
+            found=$(find . -maxdepth 3 -name project.yml -not -path "./_src/*" | head -1)
+            if [ -n "$found" ]; then
+              ROOT=$(dirname "$found")
+            else
+              zipfile=$(find . -maxdepth 2 -name "*.zip" | sort -V | tail -1)
+              if [ -n "$zipfile" ]; then
+                unzip -q "$zipfile" -d _src
+                found=$(find _src -maxdepth 3 -name project.yml | head -1)
+                [ -n "$found" ] && ROOT=$(dirname "$found")
+              fi
+            fi
+          fi
+          [ -z "$ROOT" ] && { echo "::error::Не найден project.yml"; exit 1; }
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Подготовить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Закачать фильмы
+        env:
+          POISKKINO_API_KEY: ${{ secrets.POISKKINO_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CATALOG_TOKEN: ${{ secrets.CATALOG_TOKEN }}
+        run: |
+          if [ -z "$CATALOG_TOKEN" ] || [ -z "$SUPABASE_URL" ]; then
+            echo "::warning::Нет секретов SUPABASE_URL / CATALOG_TOKEN — каталог не пополнен."
+            exit 0
+          fi
+          cd "$ROOT"
+          python3 scripts/harvest_poiskkino.py
