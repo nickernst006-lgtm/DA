@@ -97,7 +97,12 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build > "$GITHUB_WORKSPACE/xcodebuild.log" 2>&1 || true
           grep -E "error:|BUILD (SUCCEEDED|FAILED)" "$GITHUB_WORKSPACE/xcodebuild.log" | head -60 || true
-          test -d build/Release-iphoneos/Seans.app
+          # Сборка с ошибками оставляет пустую папку Seans.app — такой IPA не ставится. Останавливаемся явно.
+          if ! grep -q "BUILD SUCCEEDED" "$GITHUB_WORKSPACE/xcodebuild.log" || [ ! -f build/Release-iphoneos/Seans.app/Info.plist ]; then
+            echo "::error::Приложение не собралось — ошибки выше и в xcodebuild-log"
+            grep -E "error:" "$GITHUB_WORKSPACE/xcodebuild.log" | sed 's/^.*Seans\//Seans\//' | sort -u | head -40 | while read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
 
       - name: Упаковать IPA
         run: |
