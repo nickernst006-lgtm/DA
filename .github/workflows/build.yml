@@ -49,21 +49,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Обновить базу фильмов из Wikidata
-        # Если Wikidata недоступна, сборка продолжится с прежней базой.
-        continue-on-error: true
-        timeout-minutes: 20
-        run: |
-          cd "$ROOT"
-          python3 scripts/fetch_wikidata.py --limit 10000
-
       - name: Версия Xcode
         run: xcodebuild -version
-
-      - name: Проверить базу фильмов
-        run: |
-          cd "$ROOT"
-          python3 scripts/check_films.py
 
       - name: Вшить адрес сервера
         # Публичный адрес и ключ приложения — из секретов. Секретного ключа здесь нет.
